@@ -17,7 +17,8 @@ struct ConsoleModeGuard::Impl {
         if (stdin_handle != INVALID_HANDLE_VALUE && GetConsoleMode(stdin_handle, &stdin_mode)) {
             has_stdin_mode = true;
             DWORD raw_mode = stdin_mode;
-            raw_mode &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT);
+            raw_mode &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT);
+            raw_mode |= ENABLE_WINDOW_INPUT;
             SetConsoleMode(stdin_handle, raw_mode);
         }
 
@@ -109,5 +110,23 @@ ConsoleModeGuard::ConsoleModeGuard()
 }
 
 ConsoleModeGuard::~ConsoleModeGuard() = default;
+
+std::optional<ConsoleSize> current_console_size()
+{
+#ifdef _WIN32
+    const HANDLE stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (stdout_handle == INVALID_HANDLE_VALUE || !GetConsoleScreenBufferInfo(stdout_handle, &info)) {
+        return std::nullopt;
+    }
+
+    return ConsoleSize{
+        info.srWindow.Right - info.srWindow.Left + 1,
+        info.srWindow.Bottom - info.srWindow.Top + 1,
+    };
+#else
+    return std::nullopt;
+#endif
+}
 
 } // namespace hisol
