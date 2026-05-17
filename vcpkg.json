@@ -6,7 +6,10 @@
   "dependencies": [
     "boost-asio",
     "boost-beast",
+    "boost-json",
     "boost-system",
-    "openssl"
+    "cli11",
+    "openssl",
+    "zlib"
   ]
 }
