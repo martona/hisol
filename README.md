@@ -6,7 +6,7 @@ It's basically what `ipmitool ... sol activate` would be, if it had anything to 
 
 But in more concrete terms, it is a terminal bridge for BMCs that expose their browser SOL console through an HTTPS/WebSocket web UI. The only supported provider is **MegaRAC**, which covers **ASRockRack** and **ASUS** boards tested so far.
 
-The goal is deliberately narrow: speak to the same HTTPS surface the browser uses, verify TLS certificates with the operating system trust store, authenticate through the BMC web session, and bridge the resulting WebSocket terminal stream to local stdin/stdout.
+The goal is narrow: speak HTTPS, verify TLS certificates, authenticate through the BMC web session, and bridge the resulting WebSocket terminal stream to local stdin/stdout.
 
 ## Scope
 
@@ -25,8 +25,6 @@ Out of scope:
 - Reimplementing IPMI SOL over UDP 623.
 - Wrapping `ipmitool`.
 - Supermicro/ATEN Java SOL launchers that download JNLP/JAR files and then speak RMCP+/IPMI SOL directly.
-
-If a BMC only offers Java SOL or `ipmitool -I lanplus ... sol activate`, `hisol` intentionally does not try to replace that path.
 
 ## Build
 
@@ -153,15 +151,17 @@ The current implementation follows this flow:
 
 This is known to fit the ASRockRack and ASUS MegaRAC web UI behavior seen so far.
 
-MegaRAC exposes the browser SOL console through HTTPS/WebSocket, but the BMC SSH services tested so far do not offer a serial console option there.
+MegaRAC exposes the browser SOL console through HTTPS/WebSocket, but the BMC SSH services tested so far do not offer a serial console option.
 
 ### Supermicro / ATEN
 
 The Supermicro path investigated so far is not an HTTPS/WebSocket SOL console. The web UI returns a JNLP launcher, downloads a Pack200-compressed Java JAR, and the Java app speaks IPMI SOL over UDP 623 using the supplied credentials.
 
-That is effectively the same as `ipmitool -I lanplus ... sol activate`, so it is out of scope for this project.
+Hilariously, the .jnlp file contains an AES-encrypted copy of the user's credentials, the key for which is hardcoded into the JAR.
 
-Supermicro/ATEN BMCs may still expose serial console access through the BMC's SSH service. That path is worth trying before falling back to Java SOL or UDP 623, but it is also outside `hisol`'s HTTPS/WebSocket bridge model.
+That is effectively the same as `ipmitool -I lanplus ... sol activate` but somehow even worse, so it is out of scope for this project.
+
+Supermicro/ATEN BMCs may still expose serial console access through the BMC's SSH service; the systems I tested do.
 
 ## Terminal Behavior
 
@@ -175,14 +175,13 @@ Interactive mode is a bridge, not a full terminal emulator. The real terminal em
 - Ctrl+] as a local escape.
 - Ctrl+C passthrough to the remote console.
 - A warning if the visible console is smaller than 80x25.
-- A light terminal reset on exit so the local prompt lands on a fresh line.
+- A light terminal reset on exit.
 
 `hisol` does not currently send terminal resize events to the BMC. If the remote console assumes 80x25, tools such as BIOS setup screens or TUIs may still behave as if they are in an 80x25 terminal.
 
 ## TODO
 
-- Add TLS certificate or SPKI pinning.
-- Save sanitized MegaRAC HTTP/WebSocket transcripts as fixtures.
+- Add TLS certificate pinning.
 - Add tests for URL parsing, cookie handling, gzip decoding, key mapping, and MegaRAC flow construction.
 - Decide where provider code should be split once a second HTTPS/WebSocket SOL vendor needs support.
 - Add Linux and macOS support.
