@@ -18,6 +18,7 @@ struct SolOptions {
     std::string username;
     std::string password;
     bool debug_frames = false;
+    bool raw = false;
     bool verbose = false;
     bool insecure = false;
 };

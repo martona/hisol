@@ -147,6 +147,11 @@ bool should_prompt_after_bridge(const SolBridgeExitStatus& status)
     return status.kind == SolBridgeExitKind::RemoteClosed || status.kind == SolBridgeExitKind::Error;
 }
 
+bool should_log_connection_status(const SolOptions& options)
+{
+    return !options.raw || options.verbose;
+}
+
 SolRunResult run_sol_once(const SolOptions& options)
 {
     SolSession session = open_sol_session(options);
@@ -172,17 +177,26 @@ SolRunResult run_sol_once(const SolOptions& options)
         request.set(http::field::cookie, session.cookies.header());
     }));
 
-    std::cerr << "hisol: logged in; connecting to wss://" << make_host_header(options.base_url) << "/sol\n";
+    if (should_log_connection_status(options)) {
+        std::cerr << "hisol: megarac: logged in; connecting to wss://"
+                  << make_host_header(options.base_url) << "/sol\n";
+    }
     log_websocket_request(options.base_url, session.cookies, options.verbose);
     websocket::response_type handshake_response;
     ws.handshake(handshake_response, make_host_header(options.base_url), "/sol");
     log_websocket_response(handshake_response, options.verbose);
-    std::cerr << "hisol: connected; bridging stdin/stdout\n";
-    std::cerr << "hisol: local escape: Ctrl+] exits the bridge; Ctrl+C is sent to the remote console\n";
-    warn_if_console_too_small();
+    if (should_log_connection_status(options)) {
+        std::cerr << "hisol: megarac: connected; bridging stdin/stdout\n";
+    }
 
-    ConsoleModeGuard console_mode;
-    auto bridge = std::make_shared<SolBridge>(io, ws, options.debug_frames);
+    std::unique_ptr<ConsoleModeGuard> console_mode;
+    if (!options.raw) {
+        std::cerr << "hisol: local escape: Ctrl+] exits the bridge; Ctrl+C is sent to the remote console\n";
+        warn_if_console_too_small();
+        console_mode = std::make_unique<ConsoleModeGuard>();
+    }
+
+    auto bridge = std::make_shared<SolBridge>(io, ws, options.debug_frames, options.raw);
     bridge->start();
     std::thread input_thread([bridge] {
         bridge->read_stdin();
@@ -190,15 +204,17 @@ SolRunResult run_sol_once(const SolOptions& options)
 
     io.run();
     bridge->stop_input();
+    if (input_thread.joinable()) {
 #ifdef _WIN32
-    if (input_thread.joinable()) {
-        input_thread.join();
-    }
+        if (options.raw) {
+            input_thread.detach();
+        } else {
+            input_thread.join();
+        }
 #else
-    if (input_thread.joinable()) {
         input_thread.detach();
-    }
 #endif
+    }
 
     return SolRunResult{bridge->exit_code(), bridge->exit_status()};
 }
@@ -237,7 +253,7 @@ int run_sol(const SolOptions& options)
 {
     while (true) {
         SolRunResult result = run_sol_once(options);
-        if (!should_prompt_after_bridge(result.status)) {
+        if (options.raw || !should_prompt_after_bridge(result.status)) {
             return result.exit_code;
         }
 

@@ -178,9 +178,21 @@ std::string repeat_sequence(std::string_view sequence, WORD repeat_count)
 
 } // namespace
 
-SolBridge::SolBridge(asio::io_context& io, SolWebSocketStream& ws, bool debug_frames)
-    : io_(io), ws_(ws), debug_frames_(debug_frames)
+SolBridge::SolBridge(asio::io_context& io, SolWebSocketStream& ws, bool debug_frames, bool raw_mode)
+    : io_(io), ws_(ws), debug_frames_(debug_frames), raw_mode_(raw_mode)
 {
+#ifdef _WIN32
+    input_stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+#endif
+}
+
+SolBridge::~SolBridge()
+{
+#ifdef _WIN32
+    if (input_stop_event_ != nullptr) {
+        CloseHandle(static_cast<HANDLE>(input_stop_event_));
+    }
+#endif
 }
 
 void SolBridge::start()
@@ -192,6 +204,39 @@ void SolBridge::start()
 
 void SolBridge::read_stdin()
 {
+    if (raw_mode_) {
+        read_raw_stdin();
+        return;
+    }
+
+    read_interactive_stdin();
+}
+
+void SolBridge::read_raw_stdin()
+{
+    char ch = 0;
+    while (input_active_) {
+        if (!std::cin.get(ch)) {
+            set_exit_status(SolBridgeExitKind::InputEnded, "stdin ended");
+            asio::post(io_, [self = shared_from_this()] {
+                self->close_after_writes();
+            });
+            return;
+        }
+
+        if (!input_active_) {
+            return;
+        }
+
+        std::string chunk(1, ch);
+        asio::post(io_, [self = shared_from_this(), chunk = std::move(chunk)]() mutable {
+            self->queue_write(std::move(chunk));
+        });
+    }
+}
+
+void SolBridge::read_interactive_stdin()
+{
 #ifdef _WIN32
     const HANDLE stdin_handle = GetStdHandle(STD_INPUT_HANDLE);
     if (stdin_handle == INVALID_HANDLE_VALUE) {
@@ -201,14 +246,25 @@ void SolBridge::read_stdin()
         });
         return;
     }
+    if (input_stop_event_ == nullptr) {
+        set_exit_status(SolBridgeExitKind::InputEnded, "input stop event is not available");
+        asio::post(io_, [self = shared_from_this()] {
+            self->close_after_writes();
+        });
+        return;
+    }
 
     while (input_active_) {
-        const DWORD wait_result = WaitForSingleObject(stdin_handle, 100);
+        HANDLE handles[2] = {
+            stdin_handle,
+            static_cast<HANDLE>(input_stop_event_),
+        };
+        const DWORD wait_result = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
         if (!input_active_) {
             return;
         }
-        if (wait_result == WAIT_TIMEOUT) {
-            continue;
+        if (wait_result == WAIT_OBJECT_0 + 1) {
+            return;
         }
         if (wait_result != WAIT_OBJECT_0) {
             set_exit_status(SolBridgeExitKind::InputEnded, "stdin wait failed");
@@ -300,6 +356,11 @@ SolBridgeExitStatus SolBridge::exit_status() const
 void SolBridge::stop_input()
 {
     input_active_ = false;
+#ifdef _WIN32
+    if (input_stop_event_ != nullptr) {
+        SetEvent(static_cast<HANDLE>(input_stop_event_));
+    }
+#endif
 }
 
 void SolBridge::read_next_message()
@@ -397,6 +458,11 @@ void SolBridge::close_now()
 
 void SolBridge::set_exit_status(SolBridgeExitKind kind, std::string message)
 {
+    if (exit_status_set_) {
+        return;
+    }
+
+    exit_status_set_ = true;
     exit_status_.kind = kind;
     exit_status_.message = std::move(message);
 }

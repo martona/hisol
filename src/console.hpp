@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace hisol {
 
@@ -23,5 +24,6 @@ private:
 };
 
 std::optional<ConsoleSize> current_console_size();
+std::string read_password_from_console(const std::string& prompt);
 
 } // namespace hisol

@@ -30,7 +30,8 @@ struct SolBridgeExitStatus {
 
 class SolBridge : public std::enable_shared_from_this<SolBridge> {
 public:
-    SolBridge(boost::asio::io_context& io, SolWebSocketStream& ws, bool debug_frames);
+    SolBridge(boost::asio::io_context& io, SolWebSocketStream& ws, bool debug_frames, bool raw_mode);
+    ~SolBridge();
 
     void start();
     void read_stdin();
@@ -39,6 +40,8 @@ public:
     void stop_input();
 
 private:
+    void read_raw_stdin();
+    void read_interactive_stdin();
     void read_next_message();
     void queue_write(std::string chunk);
     void write_next_message();
@@ -53,11 +56,16 @@ private:
     boost::beast::flat_buffer read_buffer_;
     std::deque<std::string> write_queue_;
     bool debug_frames_ = false;
+    bool raw_mode_ = false;
     bool close_requested_ = false;
     bool closing_ = false;
     std::atomic_bool input_active_ = true;
+    bool exit_status_set_ = false;
     SolBridgeExitStatus exit_status_;
     int exit_code_ = 0;
+#ifdef _WIN32
+    void* input_stop_event_ = nullptr;
+#endif
 };
 
 } // namespace hisol

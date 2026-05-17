@@ -2,6 +2,7 @@
 
 #include "app_info.hpp"
 #include "commands.hpp"
+#include "console.hpp"
 #include "options.hpp"
 #include "text.hpp"
 #include "url.hpp"
@@ -38,15 +39,29 @@ void fill_default_sol_credentials(SolOptions& options, const std::string& passwo
         throw std::invalid_argument("missing username; pass --username or set HISOL_USERNAME");
     }
     if (options.password.empty()) {
-        throw std::invalid_argument("missing password; pass --password, --password-env, or set HISOL_PASSWORD");
+        options.password = read_password_from_console("Password for " + options.username + ": ");
     }
+    if (options.password.empty()) {
+        throw std::invalid_argument("empty password entered");
+    }
+}
+
+void configure_megarac_subcommand(CLI::App& command, SolOptions& options, std::string& password_env_name)
+{
+    command.add_flag("-k,--insecure", options.insecure, "Disable certificate and hostname verification.");
+    command.add_flag("-v,--verbose", options.verbose, "Log setup HTTP and WebSocket handshake details to stderr.");
+    command.add_flag("--debug-frames", options.debug_frames, "Log WebSocket frame sizes to stderr.");
+    command.add_flag("--raw", options.raw, "Use an exact stdin/stdout byte bridge with no console handling.");
+    command.add_option("-u,--username", options.username, "Username for the MegaRAC /api/session login.");
+    command.add_option("-p,--password", options.password, "Password for the MegaRAC /api/session login.");
+    command.add_option("--password-env", password_env_name, "Read the password from an environment variable.");
 }
 
 } // namespace
 
 int run_cli(int argc, char* argv[])
 {
-    CLI::App app{std::string(kExpansion) + " stream bridge", std::string(kName)};
+    CLI::App app{std::string(kExpansion) + " MegaRAC stream bridge", std::string(kName)};
     app.set_version_flag("--version", std::string(kName) + " " + std::string(kVersion));
     app.require_subcommand(1);
 
@@ -61,14 +76,12 @@ int run_cli(int argc, char* argv[])
     SolOptions sol_options;
     std::string sol_url;
     std::string password_env_name;
-    CLI::App* sol = app.add_subcommand("sol", "Connect to the HTTPS WebSocket SOL endpoint.");
-    sol->add_flag("-k,--insecure", sol_options.insecure, "Disable certificate and hostname verification.");
-    sol->add_flag("-v,--verbose", sol_options.verbose, "Log setup HTTP and WebSocket handshake details to stderr.");
-    sol->add_flag("--debug-frames", sol_options.debug_frames, "Log WebSocket frame sizes to stderr.");
-    sol->add_option("-u,--username", sol_options.username, "Username for /api/session.");
-    sol->add_option("-p,--password", sol_options.password, "Password for /api/session.");
-    sol->add_option("--password-env", password_env_name, "Read the password from an environment variable.");
+    CLI::App* sol = app.add_subcommand("sol", "Connect to a MegaRAC HTTPS WebSocket SOL endpoint.");
+    configure_megarac_subcommand(*sol, sol_options, password_env_name);
     sol->add_option("url", sol_url, "https://host[:port]")->required();
+    CLI::App* megarac = app.add_subcommand("megarac", "Connect to a MegaRAC HTTPS WebSocket SOL endpoint.");
+    configure_megarac_subcommand(*megarac, sol_options, password_env_name);
+    megarac->add_option("url", sol_url, "https://host[:port]")->required();
 
     if (argc == 1) {
         std::cout << app.help();
@@ -86,7 +99,7 @@ int run_cli(int argc, char* argv[])
         return run_get(get_options);
     }
 
-    if (*sol) {
+    if (*sol || *megarac) {
         sol_options.base_url = parse_https_url(sol_url);
         sol_options.base_url.target = "/";
         fill_default_sol_credentials(sol_options, password_env_name);
